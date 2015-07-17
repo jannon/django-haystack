@@ -757,7 +757,7 @@ class WhooshSearchBackend(BaseSearchBackend):
 
 
 class WhooshSearchQuery(BaseSearchQuery):
-    stemming = True
+    stemming = getattr(settings, 'HAYSTACK_WHOOSH_STEM_QUERIES', True)
 
     def _convert_datetime(self, date):
         if hasattr(date, 'hour'):
