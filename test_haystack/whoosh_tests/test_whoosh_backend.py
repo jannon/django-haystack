@@ -399,8 +399,8 @@ class WhooshSearchBackendTestCase(WhooshTestCase):
 
         (content_field_name, schema) = self.sb.build_schema(ui.all_searchfields())
         self.assertEqual(content_field_name, 'text')
-        self.assertEqual(len(schema.names()), 9)
-        self.assertEqual(schema.names(), ['django_ct', 'django_id', 'id', 'is_active', 'name', 'pub_date', 'seen_count', 'sites', 'text'])
+        self.assertEqual(len(schema.names()), 10)
+        self.assertEqual(schema.names(), ['django_ct', 'django_id', 'id', 'is_active', 'name', 'pub_date', 'seen_count', 'sites', 'spell_text', 'text'])
         self.assertTrue(isinstance(schema._fields['text'], TEXT))
         self.assertTrue(isinstance(schema._fields['pub_date'], DATETIME))
         self.assertTrue(isinstance(schema._fields['seen_count'], NUMERIC))
@@ -551,8 +551,11 @@ class LiveWhooshSearchQueryTestCase(WhooshTestCase):
     def test_get_spelling(self):
         self.sb.update(self.wmmi, self.sample_objs)
 
+        stemming = self.sq.stemming
+        self.sq.stemming = False
         self.sq.add_filter(SQ(content='Indexe'))
         self.assertEqual(self.sq.get_spelling_suggestion(), u'indexed')
+        self.sq.stemming = stemming
 
     def test_log_query(self):
         from django.conf import settings
@@ -649,7 +652,7 @@ class LiveWhooshSearchQuerySetTestCase(WhooshTestCase):
         self.assertEqual(len(sqs), 0)
 
         sqs = self.sqs.auto_query("daler-rowney pearlescent 'bell bronze'")
-        self.assertEqual(sqs.query.build_query(), u"('daler-rowney' pearlescent 'bell bronze')")
+        self.assertEqual(sqs.query.build_query(), u"('daler-rowney' pearlesc 'bell bronze')")
         self.assertEqual(len(sqs), 0)
 
         sqs = self.sqs.models(MockModel)
