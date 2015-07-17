@@ -61,7 +61,7 @@ class WhooshInputTestCase(TestCase):
 
     def test_autoquery_prepare(self):
         autoquery = inputs.AutoQuery('panic -don\'t "froody dude"')
-        self.assertEqual(autoquery.prepare(self.query_obj), u'panic NOT don\'t "froody dude"')
+        self.assertEqual(autoquery.prepare(self.query_obj), u'panic NOT don\'t "froodi dude"')
 
     def test_altparser_init(self):
         altparser = inputs.AltParser('dismax')

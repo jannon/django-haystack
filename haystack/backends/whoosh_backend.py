@@ -47,6 +47,7 @@ if not hasattr(whoosh, '__version__') or whoosh.__version__ < (2, 5, 0):
 # Bubble up the correct error.
 from whoosh import index
 from whoosh.analysis import StemmingAnalyzer
+from whoosh.lang.porter import stem
 from whoosh.fields import ID as WHOOSH_ID
 from whoosh.fields import BOOLEAN, DATETIME, IDLIST, KEYWORD, NGRAM, NGRAMWORDS, NUMERIC, Schema, TEXT
 from whoosh.filedb.filestore import FileStorage, RamStorage
@@ -755,6 +756,8 @@ class WhooshSearchBackend(BaseSearchBackend):
 
 
 class WhooshSearchQuery(BaseSearchQuery):
+    stemming = True
+
     def _convert_datetime(self, date):
         if hasattr(date, 'hour'):
             return force_text(date.strftime('%Y%m%d%H%M%S'))
@@ -782,6 +785,8 @@ class WhooshSearchQuery(BaseSearchQuery):
                     word = "'%s'" % word
                     break
 
+            if self.stemming:
+                word = stem(word)
             cleaned_words.append(word)
 
         return ' '.join(cleaned_words)
