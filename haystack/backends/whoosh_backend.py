@@ -20,6 +20,7 @@ from haystack.inputs import Clean, Exact, PythonData, Raw
 from haystack.models import SearchResult
 from haystack.utils import log as logging
 from haystack.utils import get_identifier, get_model_ct
+from haystack.utils.loading import import_class
 from haystack.utils.app_loading import haystack_get_model
 
 try:
@@ -141,6 +142,12 @@ class WhooshSearchBackend(BaseSearchBackend):
 
         self.setup_complete = True
 
+    def get_analyzer_class(self, field_class):
+        ret = getattr(settings, 'HAYSTACK_WHOOSH_ANALYZER_CLASS', StemmingAnalyzer)
+        if isinstance(ret, six.string_types):
+            ret = import_class(ret)
+        return ret
+
     def build_schema(self, fields):
         schema_fields = {
             ID: WHOOSH_ID(stored=True, unique=True),
@@ -172,7 +179,7 @@ class WhooshSearchBackend(BaseSearchBackend):
             elif field_class.field_type == 'edge_ngram':
                 schema_fields[field_class.index_fieldname] = NGRAMWORDS(minsize=2, maxsize=15, at='start', stored=field_class.stored, field_boost=field_class.boost)
             else:
-                analyzer_class = getattr(settings, 'HAYSTACK_WHOOSH_ANALYZER_CLASS', StemmingAnalyzer)
+                analyzer_class = self.get_analyzer_class(field_class)
                 schema_fields[field_class.index_fieldname] = TEXT(stored=True, analyzer=analyzer_class(), field_boost=field_class.boost, sortable=True)
 
             if field_class.document is True:
