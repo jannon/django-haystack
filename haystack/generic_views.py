@@ -58,11 +58,14 @@ class SearchMixin(MultipleObjectMixin, FormMixin):
         Returns the keyword arguments for instantiating the form.
         """
         kwargs = {'initial': self.get_initial()}
-        if self.request.method == 'GET':
+        if self.request.method == 'GET' and self.request.GET:
             kwargs.update({
                 'data': self.request.GET,
             })
-        kwargs.update({'searchqueryset': self.get_queryset()})
+        kwargs.update({
+            'searchqueryset': self.get_queryset(),
+            'load_all': self.load_all,
+        })
         return kwargs
 
     def form_invalid(self, form):
@@ -88,9 +91,10 @@ class FacetedSearchMixin(SearchMixin):
     faceting.
     """
     form_class = FacetedSearchForm
+    facet_fields = None
 
     def get_form_kwargs(self):
-        kwargs = super(SearchMixin, self).get_form_kwargs()
+        kwargs = super(FacetedSearchMixin, self).get_form_kwargs()
         kwargs.update({
             'selected_facets': self.request.GET.getlist("selected_facets")
         })
@@ -98,8 +102,14 @@ class FacetedSearchMixin(SearchMixin):
 
     def get_context_data(self, **kwargs):
         context = super(FacetedSearchMixin, self).get_context_data(**kwargs)
-        context.update({'facets': self.results.facet_counts()})
+        context.update({'facets': self.queryset.facet_counts()})
         return context
+
+    def get_queryset(self):
+        qs = super(FacetedSearchMixin, self).get_queryset()
+        for field in self.facet_fields:
+            qs = qs.facet(field)
+        return qs
 
 
 class SearchView(SearchMixin, FormView):

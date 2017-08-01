@@ -3,27 +3,31 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import datetime
+import os
 from tempfile import mkdtemp
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import StringIO
 
 import pysolr
-from django import VERSION as DJANGO_VERSION
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from mock import patch
 
-from haystack import connections, indexes
+from haystack import connections, constants, indexes
 from haystack.utils.loading import UnifiedIndex
 
 from ..core.models import MockModel, MockTag
-from ..utils import unittest
 
 
 class SolrMockSearchIndex(indexes.SearchIndex, indexes.Indexable):
     text = indexes.CharField(document=True, use_template=True)
     name = indexes.CharField(model_attr='author', faceted=True)
-    pub_date = indexes.DateField(model_attr='pub_date')
+    pub_date = indexes.DateTimeField(model_attr='pub_date')
 
     def get_model(self):
         return MockModel
@@ -39,8 +43,15 @@ class SolrMockTagSearchIndex(indexes.SearchIndex, indexes.Indexable):
         return MockTag
 
 
+class SolrMockSecretKeySearchIndex(indexes.SearchIndex, indexes.Indexable):
+    Th3S3cr3tK3y = indexes.CharField(document=True, model_attr='author')
+
+    def get_model(self):
+        return MockModel
+
+
 class ManagementCommandTestCase(TestCase):
-    fixtures = ['bulk_data.json']
+    fixtures = ['base_data.json', 'bulk_data.json']
 
     def setUp(self):
         super(ManagementCommandTestCase, self).setUp()
@@ -57,6 +68,17 @@ class ManagementCommandTestCase(TestCase):
         connections['solr']._index = self.old_ui
         super(ManagementCommandTestCase, self).tearDown()
 
+    def verify_indexed_documents(self):
+        """Confirm that the documents in the search index match the database"""
+
+        res = self.solr.search('*:*', fl=['id'], rows=50)
+        self.assertEqual(res.hits, 23)
+
+        indexed_doc_ids = set(i['id'] for i in res.docs)
+        expected_doc_ids = set('core.mockmodel.%d' % i for i in MockModel.objects.values_list('pk', flat=True))
+
+        self.assertSetEqual(indexed_doc_ids, expected_doc_ids)
+
     def test_basic_commands(self):
         call_command('clear_index', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 0)
@@ -65,7 +87,7 @@ class ManagementCommandTestCase(TestCase):
         self.assertEqual(self.solr.search('*:*').hits, 0)
 
         call_command('update_index', verbosity=0)
-        self.assertEqual(self.solr.search('*:*').hits, 23)
+        self.verify_indexed_documents()
 
         call_command('clear_index', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 0)
@@ -74,17 +96,17 @@ class ManagementCommandTestCase(TestCase):
         self.assertEqual(self.solr.search('*:*').hits, 0)
 
         call_command('rebuild_index', interactive=False, verbosity=0, commit=True)
-        self.assertEqual(self.solr.search('*:*').hits, 23)
+        self.verify_indexed_documents()
 
         call_command('clear_index', interactive=False, verbosity=0, commit=False)
-        self.assertEqual(self.solr.search('*:*').hits, 23)
+        self.verify_indexed_documents()
 
     def test_remove(self):
         call_command('clear_index', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 0)
 
         call_command('update_index', verbosity=0)
-        self.assertEqual(self.solr.search('*:*').hits, 23)
+        self.verify_indexed_documents()
 
         # Remove several instances, two of which will fit in the same block:
         MockModel.objects.get(pk=1).delete()
@@ -119,9 +141,8 @@ class ManagementCommandTestCase(TestCase):
         call_command('update_index', age=3, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 1)
 
-    @unittest.skipIf(DJANGO_VERSION < (1, 4, 0), 'timezone support was added in Django 1.4')
     def test_age_with_time_zones(self):
-        """Haystack should use django.utils.timezone.now on Django 1.4+"""
+        """Haystack should use django.utils.timezone.now"""
         from django.utils.timezone import now as django_now
         from haystack.management.commands.update_index import now as haystack_now
 
@@ -158,9 +179,8 @@ class ManagementCommandTestCase(TestCase):
         call_command('clear_index', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 0)
 
-        # TODO: Watch the output, make sure there are multiple pids.
         call_command('update_index', verbosity=2, workers=2, batchsize=5)
-        self.assertEqual(self.solr.search('*:*').hits, 23)
+        self.verify_indexed_documents()
 
         call_command('clear_index', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 0)
@@ -176,9 +196,59 @@ class ManagementCommandTestCase(TestCase):
         connections['whoosh']._index = self.ui
         self.assertRaises(ImproperlyConfigured, call_command, 'build_solr_schema', using='whoosh', interactive=False)
 
+    def test_build_schema(self):
+
+        # Stow.
+        oldhdf = constants.DOCUMENT_FIELD
+        oldui = connections['solr'].get_unified_index()
+        oldurl = settings.HAYSTACK_CONNECTIONS['solr']['URL']
+
+        needle = 'Th3S3cr3tK3y'
+        constants.DOCUMENT_FIELD = needle   # Force index to use new key for document_fields
+        settings.HAYSTACK_CONNECTIONS['solr']['URL'] = settings.HAYSTACK_CONNECTIONS['solr']['URL'].rsplit('/', 1)[0] + '/mgmnt'
+
+        ui = UnifiedIndex()
+        ui.build(indexes=[SolrMockSecretKeySearchIndex()])
+        connections['solr']._index = ui
+
+        rendered_file = StringIO()
+
+        script_dir = os.path.realpath(os.path.dirname(__file__))
+        conf_dir = os.path.join(script_dir, 'server', 'solr', 'server', 'solr', 'mgmnt', 'conf')
+        schema_file = os.path.join(conf_dir, 'schema.xml')
+        solrconfig_file = os.path.join(conf_dir, 'solrconfig.xml')
+
+        self.assertTrue(os.path.isdir(conf_dir), msg='Expected %s to be a directory' % conf_dir)
+
+        call_command('build_solr_schema', using='solr', stdout=rendered_file)
+        contents = rendered_file.getvalue()
+        self.assertGreater(contents.find("name=\"%s" % needle), -1)
+
+        call_command('build_solr_schema', using='solr', configure_directory=conf_dir)
+        with open(schema_file) as s:
+            self.assertGreater(s.read().find("name=\"%s" % needle), -1)
+        with open(solrconfig_file) as s:
+            self.assertGreater(s.read().find("name=\"df\">%s" % needle), -1)
+
+        self.assertTrue(os.path.isfile(os.path.join(conf_dir, 'managed-schema.old')))
+
+        call_command('build_solr_schema', using='solr', reload_core=True)
+
+        os.rename(schema_file, '%s.bak' % schema_file)
+        self.assertRaises(CommandError, call_command, 'build_solr_schema', using='solr', reload_core=True)
+
+        call_command('build_solr_schema', using='solr', filename=schema_file)
+        with open(schema_file) as s:
+            self.assertGreater(s.read().find("name=\"%s" % needle), -1)
+
+        # reset
+        constants.DOCUMENT_FIELD = oldhdf
+        connections['solr']._index = oldui
+        settings.HAYSTACK_CONNECTIONS['solr']['URL'] = oldurl
+
 
 class AppModelManagementCommandTestCase(TestCase):
-    fixtures = ['bulk_data.json']
+    fixtures = ['base_data', 'bulk_data.json']
 
     def setUp(self):
         super(AppModelManagementCommandTestCase, self).setUp()
@@ -212,7 +282,8 @@ class AppModelManagementCommandTestCase(TestCase):
         call_command('clear_index', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 0)
 
-        self.assertRaises(ImproperlyConfigured, call_command, 'update_index', 'fake_app_thats_not_there', interactive=False)
+        with self.assertRaises(ImproperlyConfigured):
+            call_command('update_index', 'fake_app_thats_not_there', interactive=False)
 
         call_command('update_index', 'core', 'discovery', interactive=False, verbosity=0)
         self.assertEqual(self.solr.search('*:*').hits, 25)

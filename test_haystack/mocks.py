@@ -2,7 +2,7 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from django.db.models.loading import get_model
+from django.apps import apps
 
 from haystack.backends import BaseEngine, BaseSearchBackend, BaseSearchQuery, log_query
 from haystack.models import SearchResult
@@ -32,13 +32,19 @@ class MockPassthroughRouter(BaseRouter):
         return None
 
 
+class MockMultiRouter(BaseRouter):
+    def for_write(self, **hints):
+        return ['multi1', 'multi2']
+
+
 class MockSearchResult(SearchResult):
     def __init__(self, app_label, model_name, pk, score, **kwargs):
         super(MockSearchResult, self).__init__(app_label, model_name, pk, score, **kwargs)
-        self._model = get_model('core', model_name)
+        self._model = apps.get_model('core', model_name)
 
 MOCK_SEARCH_RESULTS = [MockSearchResult('core', 'MockModel', i, 1 - (i / 100.0)) for i in range(1, 100)]
 MOCK_INDEX_DATA = {}
+
 
 class MockSearchBackend(BaseSearchBackend):
     model_name = 'mockmodel'
@@ -51,10 +57,10 @@ class MockSearchBackend(BaseSearchBackend):
 
     def remove(self, obj, commit=True):
         global MOCK_INDEX_DATA
-        if commit == True:
+        if commit:
             del(MOCK_INDEX_DATA[get_identifier(obj)])
 
-    def clear(self, models=[], commit=True):
+    def clear(self, models=None, commit=True):
         global MOCK_INDEX_DATA
         MOCK_INDEX_DATA = {}
 
@@ -78,7 +84,7 @@ class MockSearchBackend(BaseSearchBackend):
 
         for i, result in enumerate(sliced):
             app_label, model_name, pk = result.split('.')
-            model = get_model(app_label, model_name)
+            model = apps.get_model(app_label, model_name)
 
             if model:
                 if model in indexed_models:
@@ -102,10 +108,12 @@ class CharPKMockSearchBackend(MockSearchBackend):
     mock_search_results = [MockSearchResult('core', 'CharPKMockModel', 'sometext', 0.5),
                            MockSearchResult('core', 'CharPKMockModel', '1234', 0.3)]
 
+
 class ReadQuerySetMockSearchBackend(MockSearchBackend):
     model_name = 'afifthmockmodel'
     mock_search_results = [MockSearchResult('core', 'afifthmockmodel', 1, 2),
                            MockSearchResult('core', 'afifthmockmodel', 2, 2)]
+
 
 class MixedMockSearchBackend(MockSearchBackend):
     @log_query

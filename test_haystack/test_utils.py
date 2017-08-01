@@ -6,7 +6,8 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from test_haystack.core.models import MockModel
 
-from haystack.utils import _lookup_identifier_method, get_facet_field_name, get_identifier, Highlighter, log
+from haystack.utils import _lookup_identifier_method, get_facet_field_name, get_identifier, log
+from haystack.utils.highlighting import Highlighter
 
 
 class GetIdentifierTestCase(TestCase):
@@ -19,6 +20,8 @@ class GetIdentifierTestCase(TestCase):
 
 
 class GetFacetFieldNameTestCase(TestCase):
+    fixtures = ['base_data']
+
     def test_get_identifier(self):
         self.assertEqual(get_identifier('core.mockmodel.1'), 'core.mockmodel.1')
 
@@ -28,8 +31,20 @@ class GetFacetFieldNameTestCase(TestCase):
 
     @override_settings(HAYSTACK_IDENTIFIER_METHOD='test_haystack.core.custom_identifier.get_identifier_method')
     def test_haystack_identifier_method(self):
+        # The custom implementation returns the MD-5 hash of the key value by
+        # default:
         get_identifier = _lookup_identifier_method()
-        self.assertEqual(get_identifier('a.b.c'), 'a.b.c')
+        self.assertEqual(get_identifier('a.b.c'),
+                         '553f764f7b436175c0387e22b4a19213')
+
+        # … but it also supports a custom override mechanism which would
+        # definitely fail with the default implementation:
+        class custom_id_class(object):
+            def get_custom_haystack_id(self):
+                return 'CUSTOM'
+
+        self.assertEqual(get_identifier(custom_id_class()),
+                         'CUSTOM')
 
     @override_settings(HAYSTACK_IDENTIFIER_METHOD='test_haystack.core.custom_identifier.not_there')
     def test_haystack_identifier_method_bad_path(self):

@@ -28,6 +28,7 @@ class GenericSearchViewsTestCase(TestCase):
         self.assertEqual(form_kwargs.get('data').get('q'), self.query)
         self.assertEqual(form_kwargs.get('initial'), {})
         self.assertTrue('searchqueryset' in form_kwargs)
+        self.assertTrue('load_all' in form_kwargs)
 
     def test_search_view_response(self):
         """Test the generic SearchView response."""
@@ -37,6 +38,8 @@ class GenericSearchViewsTestCase(TestCase):
         self.assertEqual(context['query'], self.query)
         self.assertEqual(context.get('view').__class__, SearchView)
         self.assertEqual(context.get('form').__class__, ModelSearchForm)
+        self.assertIn('page_obj', context)
+        self.assertNotIn('page', context)
 
     def test_search_view_form_valid(self):
         """Test the generic SearchView form is valid."""
